@@ -1,17 +1,20 @@
 'use strict';
 
 const { detachNodeFromParent } = require('../lib/xast.js');
+const { isExecutableUrl } = require('../lib/svgo/tools.js');
 
 exports.name = 'removeScriptElement';
 exports.type = 'visitor';
 exports.active = false;
 exports.description = 'removes <script> elements (disabled by default)';
 
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+/** Namespaces that support SVG <a> elements. */
+const ANCHOR_NAMESPACES = [SVG_NAMESPACE];
+
 /** Namespaces that support executable <script> elements. */
-const SCRIPT_NAMESPACES = [
-  'http://www.w3.org/2000/svg',
-  'http://www.w3.org/1999/xhtml',
-];
+const SCRIPT_NAMESPACES = [SVG_NAMESPACE, 'http://www.w3.org/1999/xhtml'];
 
 /**
  * @param {string} elem
@@ -79,7 +82,14 @@ exports.fn = () => {
           detachNodeFromParent(node, parentNode);
         }
       },
-      exit: (node) => {
+      exit: (node, parentNode) => {
+        const isAnchor = isNamespaceAwareElem(
+          node.name,
+          'a',
+          prefixes,
+          ANCHOR_NAMESPACES
+        );
+
         for (const k of Object.keys(node.attributes)) {
           if (!k.startsWith('xmlns:')) {
             continue;
@@ -87,6 +97,27 @@ exports.fn = () => {
 
           const prefix = k.slice(6);
           /** @type {string[]} */ (prefixes.get(prefix)).pop();
+        }
+
+        if (isAnchor) {
+          for (const attr of Object.keys(node.attributes)) {
+            if (
+              (attr === 'href' || attr.endsWith(':href')) &&
+              node.attributes[attr] != null &&
+              isExecutableUrl(node.attributes[attr])
+            ) {
+              const index = parentNode.children.indexOf(node);
+              parentNode.children.splice(index, 1, ...node.children);
+
+              for (const child of node.children) {
+                Object.defineProperty(child, 'parentNode', {
+                  writable: true,
+                  value: parentNode,
+                });
+              }
+              break;
+            }
+          }
         }
       },
     },
